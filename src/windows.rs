@@ -11,6 +11,12 @@ use core::{ffi::c_void, num::NonZeroU32, ptr};
 
 const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
 
+#[link(name = "advapi32")]
+extern "system" {
+    #[link_name = "SystemFunction036"]
+    fn RtlGenRandom(RandomBuffer: *mut u8, RandomBufferLength: u32) -> u8;
+}
+
 #[link(name = "bcrypt")]
 extern "system" {
     fn BCryptGenRandom(
@@ -21,6 +27,7 @@ extern "system" {
     ) -> u32;
 }
 
+#[cfg(target_pointer_width = "64")]
 pub fn getrandom_inner(dest: &mut [u8]) -> Result<(), Error> {
     // Prevent overflow of u32
     for chunk in dest.chunks_mut(u32::max_value() as usize) {
@@ -42,6 +49,18 @@ pub fn getrandom_inner(dest: &mut [u8]) -> Result<(), Error> {
             // system does not have a way to express this yet.
             let code = unsafe { NonZeroU32::new_unchecked(code) };
             return Err(Error::from(code));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_pointer_width = "64"))]
+pub fn getrandom_inner(dest: &mut [u8]) -> Result<(), Error> {
+    // Prevent overflow of u32
+    for chunk in dest.chunks_mut(u32::max_value() as usize) {
+        let ret = unsafe { RtlGenRandom(chunk.as_mut_ptr(), chunk.len() as u32) };
+        if ret == 0 {
+            return Err(Error::WINDOWS_RTL_GEN_RANDOM);
         }
     }
     Ok(())
